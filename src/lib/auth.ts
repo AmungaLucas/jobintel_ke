@@ -14,28 +14,43 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) {
+        try {
+          if (!credentials?.email || !credentials?.password) {
+            console.log('[AUTH] Missing credentials')
+            return null
+          }
+
+          console.log('[AUTH] Looking up user:', credentials.email)
+          const user = await db.user.findUnique({
+            where: { email: credentials.email },
+          })
+
+          if (!user) {
+            console.log('[AUTH] User not found')
+            return null
+          }
+          if (!user.passwordHash) {
+            console.log('[AUTH] No passwordHash for user')
+            return null
+          }
+
+          console.log('[AUTH] Comparing password...')
+          const isValid = await bcrypt.compare(credentials.password, user.passwordHash)
+          if (!isValid) {
+            console.log('[AUTH] Password mismatch')
+            return null
+          }
+
+          console.log('[AUTH] Login success:', user.id)
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+          }
+        } catch (error) {
+          console.error('[AUTH] Authorize error:', error)
           return null
-        }
-
-        const user = await db.user.findUnique({
-          where: { email: credentials.email },
-        })
-
-        if (!user || !user.passwordHash) {
-          return null
-        }
-
-        const isValid = await bcrypt.compare(credentials.password, user.passwordHash)
-        if (!isValid) {
-          return null
-        }
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
         }
       },
     }),
@@ -46,17 +61,15 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30 * 24 * 60 * 60,
   },
   callbacks: {
     async jwt({ token, user, account }) {
-      // Initial sign in
       if (user) {
         token.id = user.id
         token.role = (user as any).role || 'candidate'
       }
 
-      // Google OAuth: create user + candidate if first time
       if (account && account.provider === 'google' && token.email) {
         const existing = await db.user.findUnique({
           where: { email: token.email as string },
@@ -79,9 +92,7 @@ export const authOptions: NextAuthOptions = {
                 },
               },
               candidate: {
-                create: {
-                  onboardingState: 'STARTED',
-                },
+                create: { onboardingState: 'STARTED' },
               },
             },
           })
@@ -100,21 +111,10 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).role = token.role
       }
       return session
-      },
+    },
   },
   pages: {
     signIn: '/auth/signin',
-    },
-  secret: process.env.NEXTAUTH_SECRET,
-  cookies: {
-    sessionToken: {
-      name: `__Secure-next-auth.session-token`,
-      options: {
-        httpOnly: true,
-        sameSite: 'lax',
-        path: '/',
-        secure: true,
-      },
-    },
   },
+  secret: process.env.NEXTAUTH_SECRET,
 }
