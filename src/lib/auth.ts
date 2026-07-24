@@ -5,6 +5,7 @@ import bcrypt from 'bcryptjs'
 import { db } from './db'
 
 export const authOptions: NextAuthOptions = {
+  trustHost: true,
   providers: [
     CredentialsProvider({
       name: 'credentials',
@@ -105,4 +106,15 @@ export const authOptions: NextAuthOptions = {
     signIn: '/auth/signin',
     },
   secret: process.env.NEXTAUTH_SECRET,
+  cookies: {
+    sessionToken: {
+      name: `__Secure-next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: true,
+      },
+    },
+  },
 }
