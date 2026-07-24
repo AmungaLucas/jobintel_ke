@@ -1,10 +1,10 @@
 'use client'
 
-import { useState } from 'react'
-import { signIn } from 'next-auth/react'
+import { useState, useEffect } from 'react'
+import { useSession, signIn, getCsrfToken } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Briefcase, Mail, Lock, User, ArrowRight } from 'lucide-react'
+import { Briefcase, Mail, Lock, User, ArrowRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,9 +12,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 
 export default function SignUpPage() {
   const router = useRouter()
+  const { status } = useSession()
+  const [csrfToken, setCsrfToken] = useState('')
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      router.push('/dashboard')
+    }
+    if (status === 'unauthenticated') {
+      getCsrfToken().then(token => setCsrfToken(token || ''))
+    }
+  }, [status, router])
 
   function update(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -36,6 +47,7 @@ export default function SignUpPage() {
 
     setLoading(true)
     try {
+      // 1. Create account
       const res = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -48,17 +60,23 @@ export default function SignUpPage() {
         return
       }
 
-      // Auto sign in
-      const result = await signIn('credentials', {
-        email: form.email,
-        password: form.password,
-        redirect: false,
+      // 2. Auto sign in using fetch (same pattern as signin page)
+      const body = new URLSearchParams()
+      body.append('email', form.email)
+      body.append('password', form.password)
+      body.append('csrfToken', csrfToken)
+
+      const loginRes = await fetch('/api/auth/callback/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        redirect: 'manual',
       })
 
-      if (result?.error) {
-        router.push('/auth/signin')
+      if (loginRes.status === 0 || loginRes.type === 'opaqueredirect' || (loginRes.status >= 300 && loginRes.status < 400)) {
+        window.location.href = '/onboarding'
       } else {
-        router.push('/onboarding')
+        router.push('/auth/signin')
       }
     } catch {
       setError('Something went wrong. Please try again.')
@@ -70,7 +88,6 @@ export default function SignUpPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-8">
       <div className="w-full max-w-md">
-        {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2">
             <div className="w-10 h-10 bg-emerald-600 rounded-lg flex items-center justify-center">
@@ -163,8 +180,11 @@ export default function SignUpPage() {
                 className="w-full bg-emerald-600 hover:bg-emerald-700 text-white"
                 disabled={loading}
               >
-                {loading ? 'Creating account...' : 'Create Account'}
-                {!loading && <ArrowRight className="w-4 h-4 ml-2" />}
+                {loading ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Creating account...</>
+                ) : (
+                  <>Create Account <ArrowRight className="w-4 h-4 ml-2" /></>
+                )}
               </Button>
             </form>
 
