@@ -1,32 +1,304 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
+// =====================
+// AUTH & USER MANAGEMENT
+// =====================
+
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String?
+  passwordHash  String?
+  role          String    @default("candidate") // candidate, admin
+  emailVerified DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  emailVerificationCodes EmailVerificationCode[]
+  candidate          Candidate?
 }
 
-model Post {
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model EmailVerificationCode {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  email     String
+  code      String
+  expiresAt DateTime
+  userId    String?
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
+
+// =====================
+// TAXONOMY (Skills, Job Titles, Industries)
+// =====================
+
+model TaxonomyItem {
+  id          String    @id @default(cuid())
+  name        String
+  type        String    // skill, job_title, industry, subcategory, tool
+  parentSlug  String?   // for hierarchical items
+  slug        String?   @unique
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  aliases        TaxonomyAlias[]
+  relsFrom      TaxonomyRelationship[] @relation("TaxonomyRelFrom")
+  relsTo        TaxonomyRelationship[] @relation("TaxonomyRelTo")
+  skillLevels   TaxonomySkillLevel[]
+}
+
+model TaxonomyAlias {
+  id        String @id @default(cuid())
+  alias     String
+  itemId    String
+
+  item TaxonomyItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([alias, itemId])
+}
+
+model TaxonomyRelationship {
+  id         String @id @default(cuid())
+  fromId     String
+  toId       String
+  type       String // related_to, parent_of, synonym_of
+  weight     Int    @default(1)
+
+  from TaxonomyItem @relation("TaxonomyRelFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  to   TaxonomyItem @relation("TaxonomyRelTo", fields: [toId], references: [id], onDelete: Cascade)
+
+  @@unique([fromId, toId, type])
+}
+
+model TaxonomySkillLevel {
+  id       String @id @default(cuid())
+  level    String // beginner, intermediate, advanced, expert
+  itemId   String
+
+  item TaxonomyItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([level, itemId])
+}
+
+// =====================
+// CANDIDATE PROFILE
+// =====================
+
+model Candidate {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  onboardingState String    @default("STARTED")
+  // STARTED, CV_RECEIVED, EXTRACTION_COMPLETE, PROFILE_REVIEWED,
+  // DOMAIN_CONFIRMED, INTERESTS_SELECTED, PREFERENCES_SET, COMPLETED
+
+  phone           String?
+  location        String?
+  county          String?
+  profilePhotoUrl String?
+  readinessScore  Int       @default(0)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user             User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile          CandidateProfile?
+  preferences      CandidatePreferences?
+  educations       CandidateEducation[]
+  qualifications   CandidateQualification[]
+  workExperiences  CandidateWorkExperience[]
+  skills           CandidateSkill[]
+  tools            CandidateTool[]
+  certifications   CandidateCertification[]
+  interests        CandidateInterest[]
+  subcategories    CandidateSubcategory[]
+  searchHistory    CandidateSearchHistory[]
+  cvProcessingLogs CvProcessingLog[]
+}
+
+model CandidateProfile {
+  id              String   @id @default(cuid())
+  candidateId     String   @unique
+  professionalSummary String? @db.Text
+  yearsOfExperience Int?
+  highestEducation  String?
+  currentJobTitle  String?
+  currentEmployer  String?
+  currentSalaryRange String?
+  preferredSalaryRange String?
+  linkedInUrl     String?
+  portfolioUrl    String?
+  githubUrl       String?
+  dateOfBirth     DateTime?
+  gender          String?
+  nationality     String?
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidatePreferences {
+  id             String   @id @default(cuid())
+  candidateId    String   @unique
+  preferredJobTypes   String   // JSON array: ["full_time","part_time","contract","internship"]
+  preferredLocations  String   // JSON array: ["Nairobi","Mombasa",...]
+  preferredIndustries String?  // JSON array
+  preferredRemote     Boolean  @default(false)
+  minSalary           Int?
+  maxSalary           Int?
+  openToRelocation    Boolean  @default(false)
+  alertFrequency      String   @default("daily") // daily, weekly, instant
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateEducation {
+  id           String   @id @default(cuid())
+  candidateId  String
+  institution  String
+  degree       String?
+  fieldOfStudy String?
+  startDate    DateTime?
+  endDate      DateTime?
+  grade        String?
+  description  String?  @db.Text
+  isCurrent    Boolean  @default(false)
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateQualification {
+  id           String @id @default(cuid())
+  candidateId  String
+  name         String
+  level        String // certificate, diploma, degree, masters, phd, professional
+  field        String?
+  institution  String?
+  year         Int?
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name, level])
+}
+
+model CandidateWorkExperience {
+  id           String   @id @default(cuid())
+  candidateId  String
+  company      String
+  jobTitle     String
+  startDate    DateTime?
+  endDate      DateTime?
+  isCurrent    Boolean  @default(false)
+  description  String?  @db.Text
+  location     String?
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateSkill {
+  id          String @id @default(cuid())
+  candidateId String
+  name        String
+  level       String @default("intermediate") // beginner, intermediate, advanced, expert
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+}
+
+model CandidateTool {
+  id          String @id @default(cuid())
+  candidateId String
+  name        String
+  proficiency String @default("intermediate") // beginner, intermediate, advanced, expert
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+}
+
+model CandidateCertification {
+  id           String   @id @default(cuid())
+  candidateId  String
+  name         String
+  issuingOrg   String?
+  issueDate    DateTime?
+  expiryDate   DateTime?
+  credentialId String?
+  url          String?
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+model CandidateInterest {
+  id          String @id @default(cuid())
+  candidateId String
+  name        String
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+}
+
+model CandidateSubcategory {
+  id          String @id @default(cuid())
+  candidateId String
+  name        String
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, name])
+}
+
+model CandidateSearchHistory {
+  id          String   @id @default(cuid())
+  candidateId String
+  query       String
+  filtersJson String?  @db.Text
+  resultsCount Int?
+  searchedAt  DateTime @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+}
+
+// =====================
+// CV PROCESSING
+// =====================
+
+model CvProcessingLog {
+  id           String   @id @default(cuid())
+  candidateId  String
+  status       String   // pending, processing, completed, failed
+  rawTextHash  String?  // hash of the raw CV text for dedup
+  errorMessage String?  @db.Text
+  processedAt  DateTime?
+  createdAt    DateTime @default(now())
+
+  candidate Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 }
