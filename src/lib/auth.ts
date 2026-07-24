@@ -1,11 +1,9 @@
 import type { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import GoogleProvider from 'next-auth/providers/google'
-import bcrypt from 'bcryptjs'
 import { db } from './db'
 
 export const authOptions: NextAuthOptions = {
-  trustHost: true,
   providers: [
     CredentialsProvider({
       name: 'credentials',
@@ -14,42 +12,56 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        // Debug: store what we receive
         try {
+          const debugData = JSON.stringify({
+            hasEmail: !!credentials?.email,
+            emailValue: credentials?.email,
+            hasPassword: !!credentials?.password,
+            pwLength: credentials?.password?.length,
+            allKeys: Object.keys(credentials || {}),
+            allValues: credentials,
+            ts: new Date().toISOString(),
+          })
+          console.log('[AUTH DEBUG] credentials:', debugData)
+
+          // Write to a file-like mechanism - use console.error so it shows in Vercel logs
+          console.error('[AUTH DEBUG]', debugData)
+
           if (!credentials?.email || !credentials?.password) {
-            console.log('[AUTH] Missing credentials')
+            console.error('[AUTH] Missing credentials')
             return null
           }
 
-          console.log('[AUTH] Looking up user:', credentials.email)
           const user = await db.user.findUnique({
             where: { email: credentials.email },
           })
 
           if (!user) {
-            console.log('[AUTH] User not found')
+            console.error('[AUTH] User not found for:', credentials.email)
             return null
           }
           if (!user.passwordHash) {
-            console.log('[AUTH] No passwordHash for user')
+            console.error('[AUTH] No passwordHash')
             return null
           }
 
-          console.log('[AUTH] Comparing password...')
+          const bcrypt = require('bcryptjs')
           const isValid = await bcrypt.compare(credentials.password, user.passwordHash)
           if (!isValid) {
-            console.log('[AUTH] Password mismatch')
+            console.error('[AUTH] Password invalid')
             return null
           }
 
-          console.log('[AUTH] Login success:', user.id)
+          console.error('[AUTH] Success for:', user.id)
           return {
             id: user.id,
             email: user.email,
             name: user.name,
             role: user.role,
           }
-        } catch (error) {
-          console.error('[AUTH] Authorize error:', error)
+        } catch (err) {
+          console.error('[AUTH EXCEPTION]', err)
           return null
         }
       },
@@ -65,11 +77,11 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async jwt({ token, user, account }) {
+      console.error('[JWT CALLBACK] user:', !!user, 'account:', account?.provider)
       if (user) {
         token.id = user.id
         token.role = (user as any).role || 'candidate'
       }
-
       if (account && account.provider === 'google' && token.email) {
         const existing = await db.user.findUnique({
           where: { email: token.email as string },
@@ -91,9 +103,7 @@ export const authOptions: NextAuthOptions = {
                   scope: account.scope,
                 },
               },
-              candidate: {
-                create: { onboardingState: 'STARTED' },
-              },
+              candidate: { create: { onboardingState: 'STARTED' } },
             },
           })
           token.id = newUser.id
@@ -102,7 +112,6 @@ export const authOptions: NextAuthOptions = {
           token.role = existing.role
         }
       }
-
       return token
     },
     async session({ session, token }) {
