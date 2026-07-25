@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useSession, signIn } from 'next-auth/react'
+import { useSession, signIn, getCsrfToken } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { getCsrfToken } from 'next-auth/react'
 import Link from 'next/link'
 import { Briefcase, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -47,12 +46,14 @@ export default function SignInPage() {
         redirect: 'manual',
       })
 
-      // Any redirect response (302/301/303/307/308) = success
-      if (res.status === 0 || res.type === 'opaqueredirect' || res.status >= 300 && res.status < 400) {
+      // With redirect:'manual', browsers return status 0 (opaque redirect) on success.
+      // Any non-200 response (status 0 or 3xx) means the server issued a redirect = login succeeded.
+      // Only a 200 or 401 with a JSON body means actual failure.
+      if (res.status === 200 || res.status === 401) {
+        setError('Invalid email or password')
+      } else {
         // Session cookie is now set, navigate to dashboard
         window.location.href = '/dashboard'
-      } else {
-        setError('Invalid email or password')
       }
     } catch {
       setError('Something went wrong. Please try again.')

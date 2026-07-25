@@ -73,10 +73,12 @@ export default function SignUpPage() {
         redirect: 'manual',
       })
 
-      if (loginRes.status === 0 || loginRes.type === 'opaqueredirect' || (loginRes.status >= 300 && loginRes.status < 400)) {
-        window.location.href = '/onboarding'
-      } else {
+      // With redirect:'manual', browsers return status 0 (opaque redirect) on success.
+      // Only a 200 or 401 response means actual failure.
+      if (loginRes.status === 200 || loginRes.status === 401) {
         router.push('/auth/signin')
+      } else {
+        window.location.href = '/onboarding'
       }
     } catch {
       setError('Something went wrong. Please try again.')
