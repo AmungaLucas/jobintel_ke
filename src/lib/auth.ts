@@ -49,9 +49,10 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async jwt({ token, user, account }) {
+      // Use userId/userRole to avoid Turbopack minification conflicts with "id"
       if (user) {
-        token.id = user.id
-        token.role = (user as any).role || 'candidate'
+        token['userId'] = user.id
+        token['userRole'] = (user as any).role || 'candidate'
       }
       if (account && account.provider === 'google' && token.email) {
         const existing = await db.user.findUnique({
@@ -77,20 +78,23 @@ export const authOptions: NextAuthOptions = {
               candidate: { create: { onboardingState: 'STARTED' } },
             },
           })
-          token.id = newUser.id
+          token['userId'] = newUser.id
         } else {
-          token.id = existing.id
-          token.role = existing.role
+          token['userId'] = existing.id
+          token['userRole'] = existing.role
         }
       }
       return token
     },
     async session({ session, token }) {
-      if (session.user) {
-        (session.user as any).id = token.id
-        (session.user as any).role = token.role
+      return {
+        ...session,
+        user: {
+          ...session.user,
+          id: token['userId'],
+          role: token['userRole'],
+        },
       }
-      return session
     },
   },
   pages: {
